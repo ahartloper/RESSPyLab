@@ -60,10 +60,12 @@ def vc_tensile_opt_scipy(x_0, file_list, rho_iso_inf, rho_iso_sup, rho_yield_inf
 
     # Define the objective function
     if not use_measured_e:
+        num_basic_param = 4
         objective_function = MatModelErrorNda(errorTest_scl, filtered_data, use_cols=False)
     else:
+        num_basic_param = 3
         emod = compute_modulus_avg(filtered_data, f_yn=x_0[0])
-        obj_fun = lambda x, data: errorTest_scl_direct_e(emod, x, data)
+        def obj_fun(x, data): return errorTest_scl_direct_e(emod, x, data)
         objective_function = MatModelErrorNda(obj_fun, filtered_data, use_cols=False)
     fun = objective_function.value
     jac = objective_function.grad
@@ -83,7 +85,8 @@ def vc_tensile_opt_scipy(x_0, file_list, rho_iso_inf, rho_iso_sup, rho_yield_inf
     g_constants = {'rho_yield_inf': rho_yield_inf, 'rho_yield_sup': rho_yield_sup,
                    'rho_iso_inf': rho_iso_inf, 'rho_iso_sup': rho_iso_sup,
                    'rho_gamma_inf': rho_gamma_b_inf, 'rho_gamma_sup': rho_gamma_b_sup,
-                   'rho_gamma_12_inf': rho_gamma_12_inf, 'rho_gamma_12_sup': rho_gamma_12_sup}
+                   'rho_gamma_12_inf': rho_gamma_12_inf, 'rho_gamma_12_sup': rho_gamma_12_sup,
+                   'n_basic_param': num_basic_param}
     # g_3 - Constraint on ratio of saturation stress to initial yield stress
     g3_low = GWrapper(g3_vco_lower, g3_vco_lower_gradient, g3_vco_lower_hessian, g_constants)
     g3_high = GWrapper(g3_vco_upper, g3_vco_upper_gradient, g3_vco_upper_hessian, g_constants)
@@ -106,15 +109,20 @@ def vc_tensile_opt_scipy(x_0, file_list, rho_iso_inf, rho_iso_sup, rho_yield_inf
     g6_sup_constr = opt.NonlinearConstraint(g_6_high.f, constr_lb, constr_ub, jac=g_6_high.gf, hess=g_6_high.hf)
 
     # Make the tuple of constraints
-    n_backstresses = int((len(x_0) - 4) // 2)
+    n_backstresses = int((len(x_0) - num_basic_param) // 2)
     if n_backstresses == 2:
         constraints = (g3_inf_constr, g3_sup_constr, g4_inf_constr, g4_sup_constr, g5_inf_constr, g5_sup_constr,
                        g6_inf_constr, g6_sup_constr)
     elif n_backstresses == 1:
         constraints = (g3_inf_constr, g3_sup_constr, g4_inf_constr, g4_sup_constr, g5_inf_constr, g5_sup_constr)
+    else:
+        raise ValueError('Bad number of backstresses specified!')
 
     # Create a new dumper if None is provided
-    dumper = ScipyBasicDumper(x_log_file, fun_log_file)
+    if use_measured_e:
+        dumper = ScipyBasicDumper(x_log_file, fun_log_file, emod=emod)
+    else:
+        dumper = ScipyBasicDumper(x_log_file, fun_log_file)
 
     # Make the point feasible
     if make_x0_feasible:
@@ -126,7 +134,9 @@ def vc_tensile_opt_scipy(x_0, file_list, rho_iso_inf, rho_iso_sup, rho_yield_inf
                              options={'maxiter': max_its, 'verbose': 2, 'gtol': tol})
     # Check if the constraints were satisfied
     vc_constraint_check(scipy_sol.x, rho_iso_inf, rho_iso_sup, rho_yield_inf, rho_yield_sup, rho_gamma_b_inf,
-                        rho_gamma_b_sup)
+                        rho_gamma_b_sup, num_basic_param)
+    if use_measured_e:
+        print ('measured E = {0:0.5e}'.format(emod))
     return [scipy_sol.x, dumper]
 
 
@@ -331,15 +341,20 @@ def make_feasible(x_0, c):
 
 
 def vc_constraint_check(x_opt, rho_iso_inf, rho_iso_sup, rho_yield_inf, rho_yield_sup, rho_gamma_b_inf,
-                        rho_gamma_b_sup):
+                        rho_gamma_b_sup, n_basic_param=4):
     """ Checks if each of g_3, g_4, and g_5 were satisfied. """
-    n_backstresses = int((len(x_opt) - 4) // 2)
+    n_backstresses = int((len(x_opt) - n_basic_param) // 2)
+    c_start = x_opt[n_basic_param]
+    g_start = x_opt[n_basic_param + 1]
+    sy_0 = x_opt[n_basic_param - 3]
+    q_inf = x_opt[n_basic_param - 2]
+    b = x_opt[n_basic_param - 1]
     sum_c_gamma = 0.
     for i in range(n_backstresses):
-        sum_c_gamma += x_opt[4 + 2 * i] / x_opt[5 + 2 * i]
-    rho_yield_ratio = (x_opt[1] + x_opt[2] + sum_c_gamma) / x_opt[1]
-    rho_iso_ratio = x_opt[2] / (x_opt[2] + sum_c_gamma)
-    rho_gamma_ratio = x_opt[5] / x_opt[3]
+        sum_c_gamma += x_opt[c_start + 2 * i] / x_opt[g_start + 2 * i]
+    rho_yield_ratio = (sy_0 + q_inf + sum_c_gamma) / sy_0
+    rho_iso_ratio = q_inf / (q_inf + sum_c_gamma)
+    rho_gamma_ratio = x_opt[g_start] / b
     print('The rho_iso ratio is = {0}'.format(rho_iso_ratio))
     print('The rho_yield ratio is = {0}'.format(rho_yield_ratio))
     print('The rho_gamma_b ratio is = {0}'.format(rho_gamma_ratio))
