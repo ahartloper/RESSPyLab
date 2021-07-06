@@ -4,7 +4,7 @@ Functions for limited information optimization using the original Voce-Chaboche 
 from __future__ import print_function
 import scipy.optimize as opt
 
-from .RESSPyLab import errorTest_scl
+from .RESSPyLab import errorTest_scl, errorTest_scl_direct_e
 from .mat_model_error_nda import MatModelErrorNda
 from .scipy_dumper import ScipyBasicDumper
 from .vc_li_opt_constraints import *
@@ -12,12 +12,14 @@ from .auglag_factory import auglag_factory, constrained_auglag_opt
 from .scipy_constr_opt_factory import GWrapper
 from .data_readers import load_and_filter_data_set, load_data_set
 from .sqp_factory import sqp_factory
+from .compute_modulus import compute_modulus_avg
 
 
 def vc_tensile_opt_scipy(x_0, file_list, rho_iso_inf, rho_iso_sup, rho_yield_inf, rho_yield_sup,
                          rho_gamma_b_inf, rho_gamma_b_sup, rho_gamma_12_inf, rho_gamma_12_sup,
                          x_log_file='', fun_log_file='', filter_data=True,
-                         max_its=600, tol=1.e-8, make_x0_feasible=True):
+                         max_its=600, tol=1.e-8, make_x0_feasible=True,
+                         use_measured_e=False):
     """ Return parameters based on a single tensile test for the original VC model using the trust-constr method.
 
     :param np.array x_0: Initial primal variables.
@@ -36,9 +38,15 @@ def vc_tensile_opt_scipy(x_0, file_list, rho_iso_inf, rho_iso_sup, rho_yield_inf
     :param int max_its: Maximum iterations allowed in analysis.
     :param float tol: Exit tolerance on the norm of grad[L].
     :param bool make_x0_feasible: If true then makes the first point feasible.
+    :param bool use_measured_e: If True, then computes E, and doesn't optimize this parameter.
     :return list:
         - (np.array): Final primal variables.
         - (ScipyBasicDumper) Dumper used in analysis.
+
+
+    Notes:
+    ======
+        - If use_measured_e=True, then x_0 should start with sigma_y0
     """
     # Ensure x_0 is an array and not a list
     if isinstance(x_0, list):
@@ -51,7 +59,12 @@ def vc_tensile_opt_scipy(x_0, file_list, rho_iso_inf, rho_iso_sup, rho_yield_inf
         filtered_data = load_data_set(file_list)
 
     # Define the objective function
-    objective_function = MatModelErrorNda(errorTest_scl, filtered_data, use_cols=False)
+    if not use_measured_e:
+        objective_function = MatModelErrorNda(errorTest_scl, filtered_data, use_cols=False)
+    else:
+        emod = compute_modulus_avg(filtered_data, f_yn=x_0[0])
+        obj_fun = lambda x, data: errorTest_scl_direct_e(emod, x, data)
+        objective_function = MatModelErrorNda(obj_fun, filtered_data, use_cols=False)
     fun = objective_function.value
     jac = objective_function.grad
     hess = objective_function.hess

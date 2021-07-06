@@ -286,6 +286,139 @@ def errorEnsemble_nda(x_sol):
     return Phi_ensemble
 
 
+def errorTest_scl_direct_e(E, x_sol, testClean):
+    """ VC model with elastic modulus defined directly. """
+    sy_0 = x_sol[0] * 1.0
+    # E = x_sol[0] * 1.0
+    Q = x_sol[1] * 1.0
+    b = x_sol[2] * 1.0
+
+    nBack = int((len(x_sol) - 3) / 2)
+
+    chabCoef = []
+
+    for i in range(nBack):
+        chabCoef.append([x_sol[3 + (2 * i)] * 1.0, x_sol[4 + (2 * i)] * 1.0])
+
+    sigma = 0.0
+    ep_eq = 0.0
+    e_p = 0.0
+    e_el = 0.0
+    e = 0.0
+
+    alphaN = np.zeros(nBack, dtype=object) * 1.0
+    sy = sy_0 * 1.0
+
+    Tol = 1e-10
+
+    e_true_calc = [0]
+    sigma_calc = [0]
+    ep_eq_calc = [0]
+
+    lineCounter = 0
+
+    Phi_test = 0.0
+
+    sum_abs_de = 0.0
+
+    sigma_SimN = 0.0
+    sigma_testN = 0.0
+
+    testClean['delta_e'] = testClean['e_true'].shift(-1) - testClean['e_true']
+    loading = testClean['delta_e'].dropna().values
+
+    for de in loading:
+
+        lineCounter = lineCounter + 1
+
+        e = e + de
+        # e_el=e_el+de
+
+        alpha = np.sum(alphaN)
+
+        sigma = sigma + E * de
+
+        phi = (sigma - alpha) ** 2 - sy ** 2
+
+        ep_eq_n_1 = ep_eq * 1.0
+
+        alphaN_1 = alphaN * 1.0
+
+        sy_N_1 = sy * 1.0
+
+        sigma_SimN_1 = sigma_SimN * 1.0
+        sigma_testN_1 = sigma_testN * 1.0
+
+        if phi > Tol:
+
+            nitMax = 1000
+
+            for nit in np.arange(nitMax):
+
+                aux = E * 1.0
+                for k in np.arange(nBack):
+                    aux = aux + chabCoef[k][0] - np.sign(sigma - alpha) * chabCoef[k][1] * alphaN[k]
+
+                dit = (-2. * alpha + 2. * sigma) * aux + np.sign(sigma - alpha) * 2. * sy * Q * b * np.exp(-b * ep_eq)
+
+                dep = (phi / (dit))
+
+                scale = 1.0
+
+                # scale to ensure that the Newton step does not overshoot
+
+                if abs(dep) > abs(sigma / E):
+                    dep = np.sign(dep) * 0.95 * abs(sigma / E)
+                    scale = 0.95 * abs(sigma / E) / abs(dep)
+
+                ## Update variables ##
+
+                ep_eq = ep_eq + np.abs(dep)
+
+                e_p = e_p + dep
+
+                sigma = sigma - E * dep
+
+                sy = sy_0 + Q * (1. - np.exp(-b * ep_eq))
+
+                for k in np.arange(nBack):
+                    c_k = chabCoef[k][0]
+                    gam_k = chabCoef[k][1]
+                    alphaN[k] = np.sign(sigma - alpha) * c_k / gam_k - (
+                            np.sign(sigma - alpha) * c_k / gam_k - alphaN_1[k]) * np.exp(
+                        -gam_k * (ep_eq - ep_eq_n_1))
+
+                alpha = np.sum(alphaN)
+
+                phi = (sigma - alpha) ** 2 - sy ** 2
+
+                if abs(phi) < Tol:
+                    break
+
+                # if nit-2==nitMax:
+                # print ('Warning convergence not reached in nonlinear loop!!!')
+
+        sigma_SimN = sigma * 1.0
+        sigma_testN = testClean['Sigma_true'].iloc[lineCounter]
+
+        e_true_calc.append(e)
+        sigma_calc.append(sigma)
+        ep_eq_calc.append(ep_eq)
+
+        # difSigN=sigma-testClean
+
+        sum_abs_de = sum_abs_de + np.abs(de)
+
+        # Square of the area under the increment with the trapezoidal rule
+
+        Phi_test = Phi_test + np.abs(de) * ((sigma_SimN - sigma_testN) ** 2 + (sigma_SimN_1 - sigma_testN_1) ** 2) / 2.
+
+    Phi_test = Phi_test / sum_abs_de
+
+    return Phi_test
+
+
+
 ##### Steihaug-Toint truncated conjugated gradient method #####
 
 def steihaug(Q, b, Delta):
