@@ -64,7 +64,7 @@ def vc_tensile_opt_scipy(x_0, file_list, rho_iso_inf, rho_iso_sup, rho_yield_inf
         objective_function = MatModelErrorNda(errorTest_scl, filtered_data, use_cols=False)
     else:
         num_basic_param = 3
-        emod = compute_modulus_avg(filtered_data, f_yn=x_0[0])
+        emod = compute_modulus_avg(filtered_data, a=1.0, f_yn=x_0[0])
         def obj_fun(x, data): return errorTest_scl_direct_e(emod, x, data)
         objective_function = MatModelErrorNda(obj_fun, filtered_data, use_cols=False)
     fun = objective_function.value
@@ -344,8 +344,8 @@ def vc_constraint_check(x_opt, rho_iso_inf, rho_iso_sup, rho_yield_inf, rho_yiel
                         rho_gamma_b_sup, n_basic_param=4):
     """ Checks if each of g_3, g_4, and g_5 were satisfied. """
     n_backstresses = int((len(x_opt) - n_basic_param) // 2)
-    c_start = x_opt[n_basic_param]
-    g_start = x_opt[n_basic_param + 1]
+    c_start = n_basic_param
+    g_start = n_basic_param + 1
     sy_0 = x_opt[n_basic_param - 3]
     q_inf = x_opt[n_basic_param - 2]
     b = x_opt[n_basic_param - 1]
